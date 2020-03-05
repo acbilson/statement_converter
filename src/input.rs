@@ -1,10 +1,8 @@
-#[derive(Debug)]
 pub enum Source {
     File(Params),
     Unknown
 }
 
-#[derive(Debug)]
 pub struct Params {
     pub path: String,
 }
@@ -28,7 +26,7 @@ mod params_tests {
     fn handles_missing_args() {
         let args: Vec<String> = vec![String::from("target/debug/statement_parser")];
 
-        let actual = match Params::new(&args) {
+        match Params::new(&args) {
             Source::File(_f) => assert!(false),
             Source::Unknown => assert!(true),
         };

@@ -17,7 +17,7 @@ use statement_parser as sp;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let params = match sp::Params::new(&args) {
+    let _params = match sp::Params::new(&args) {
         sp::Source::File(p) => p,
         sp::Source::Unknown => {
             println!("Please supply the name of the file to this command.");

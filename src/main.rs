@@ -25,13 +25,11 @@ fn main() {
         },
     };
 
-    /*
-    match sp::convert_to_journal(&params) {
+    match sp::convert_to_journal() {
         Ok(_val) => _val,
         Err(e) => {
             println!("{:?}", e);
             process::exit(1)
         }
     };
-    */
 }

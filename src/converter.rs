@@ -31,6 +31,7 @@ pub fn convert_to_journal() -> io::Result<()> {
     let f = fs::File::open(in_path)?;
     let reader = io::BufReader::new(f);
 
+    // reads, transforms, and writes
     for line in reader.lines() {
         let record = parser::parse(&line?);
         let trans = transformer::record_to_trans(&record);

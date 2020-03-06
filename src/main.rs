@@ -18,7 +18,6 @@ use std::{
 
 use std::io::{
     self,
-    prelude::*,
     BufRead,
     BufReader,
     BufWriter,
@@ -27,7 +26,7 @@ use std::io::{
 
 // external crates
 use env_logger;
-use log::{info, warn, error};
+use log::{info, error};
 use structopt::StructOpt;
 use atty::Stream;
 
@@ -47,7 +46,7 @@ fn main() {
     info!("{:?}", args);
 
     match convert_to_journal(&args) {
-        Ok(count) => info!("total transactions recorded: {}", count),
+        Ok(report) => info!("{}", report.to_string()),
         Err(e) => {
             error!("{:?}", e);
             process::exit(1)
@@ -62,11 +61,10 @@ fn main() {
 *   4. write as string
 *   5. return report
 */
-fn convert_to_journal(args: &CliArgs) -> io::Result<i32> {
+fn convert_to_journal(args: &CliArgs) -> io::Result<ConvertReport> {
 
-    // TODO: worth breaking into separate module
-    let reader = get_reader(&args.input);
-    let mut writer = get_writer(&args.output);
+    let reader = get_reader(&args.input)?;
+    let mut writer = get_writer(&args.output)?;
 
     let mut count = 0;
 
@@ -80,43 +78,53 @@ fn convert_to_journal(args: &CliArgs) -> io::Result<i32> {
         writer.flush()?;
         count += 1;
 
-        // logs every tenth trans
-        if count % 10 == 0 {
+        // logs every twenty-fifth trans
+        if count % 25 == 0 {
             info!("{:?}", trans);
         }
     }
 
-    Ok(count)
+    Ok(ConvertReport { total: count } )
+}
+
+struct ConvertReport {
+    total: i32,
+}
+
+impl ConvertReport {
+    fn to_string(&self) -> String {
+        format!("Total transactions recorded: {}", &self.total)
+    }
 }
 
 fn has_term_input() -> bool { atty::isnt(Stream::Stdin) }
 
-fn get_reader(path: &Option<String>) -> Box<dyn BufRead> {
+fn get_reader(path: &Option<String>) -> io::Result<Box<dyn BufRead>> {
 
     return match &path {
         None => { 
             if has_term_input() {
-                Box::new(BufReader::new(io::stdin()))
+                Ok(Box::new(BufReader::new(io::stdin())))
             } else {
-                panic!("failure!")
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdin is unavailable."))
             }
         },
         Some(path) => match open_statement(path) {
-            Err(e) => panic!("{:?}", e),
-            Ok(reader) => Box::new(reader),
+            Err(e) => Err(e),
+            Ok(reader) => Ok(Box::new(reader)),
         },
     };
 }
 
-fn get_writer(path: &Option<String>) -> Box<dyn Write> {
+fn get_writer(path: &Option<String>) -> io::Result<Box<dyn Write>> {
 
     return match &path {
         None => { 
-            Box::new(BufWriter::new(io::stdout()))
+            Ok(Box::new(BufWriter::new(io::stdout())))
         },
         Some(path) => match create_journal(path) {
-            Err(e) => panic!("{:?}", e),
-            Ok(writer) => Box::new(writer),
+            Err(e) => Err(e),
+            Ok(writer) => Ok(Box::new(writer)),
         },
     };
 }
@@ -124,10 +132,9 @@ fn get_writer(path: &Option<String>) -> Box<dyn Write> {
 fn create_journal(path: &str) -> io::Result<fs::File> {
 
     let out_path = path::Path::new(&path).to_str().unwrap();
-    let out_file = fs::File::create(out_path)?;
+    let writer = fs::File::create(out_path)?;
     info!("journal created at {}", &out_path);
-
-    Ok(out_file)
+    Ok(writer)
 }
 
 fn open_statement(path: &str) -> io::Result<io::BufReader<fs::File>> {
@@ -135,7 +142,6 @@ fn open_statement(path: &str) -> io::Result<io::BufReader<fs::File>> {
     let in_file = fs::File::open(in_path)?;
     let reader = io::BufReader::new(in_file);
     info!("statement opened at {}", &in_path);
-
     Ok(reader)
 }
 

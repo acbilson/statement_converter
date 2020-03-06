@@ -185,6 +185,7 @@ dependencies = [
  "atty",
  "env_logger",
  "log",
+ "regex",
  "structopt",
 ]
 

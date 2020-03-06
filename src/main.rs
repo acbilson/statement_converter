@@ -14,30 +14,29 @@ use std::{
     process,
     path, 
     fs, 
-    io, 
-    io::prelude::*
+};
+
+use std::io::{
+    self,
+    prelude::*,
+    BufRead,
+    BufReader,
+    BufWriter,
+    Write,
 };
 
 // external crates
 use env_logger;
 use log::{info, warn, error};
 use structopt::StructOpt;
+use atty::Stream;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "cli-args")]
 struct CliArgs {
 
-    input: String,
-
-    #[structopt(long = "output", short = "o", default_value = "/dev/null")]
-    output: String,
-}
-
-impl CliArgs {
-    // TODO: could get .metadata and post reason why args are not valid
-    fn valid(&self) -> bool {
-        path::Path::new(&self.input).exists()
-    }
+    input: Option<String>,
+    output: Option<String>,
 }
 
 fn main() {
@@ -46,11 +45,6 @@ fn main() {
 
     let args = CliArgs::from_args();
     info!("{:?}", args);
-
-    if !args.valid() {
-        warn!("cli args were not valid.");
-        process::exit(1);
-    }
 
     match convert_to_journal(&args) {
         Ok(count) => info!("total transactions recorded: {}", count),
@@ -70,17 +64,9 @@ fn main() {
 */
 fn convert_to_journal(args: &CliArgs) -> io::Result<i32> {
 
-    // Creates journal for writing
-    let out_path = path::Path::new(&args.output).to_str().unwrap();
-    let mut out_file = fs::File::create(out_path)?;
-    info!("journal created at {}", &out_path);
-
-    // Opens statement for reading
-    let in_path = path::Path::new(&args.input).to_str().unwrap();
-    let f = fs::File::open(in_path)?;
-    info!("statement opened at {}", &in_path);
-
-    let reader = io::BufReader::new(f);
+    // TODO: worth breaking into separate module
+    let reader = get_reader(&args.input);
+    let mut writer = get_writer(&args.output);
 
     let mut count = 0;
 
@@ -89,9 +75,9 @@ fn convert_to_journal(args: &CliArgs) -> io::Result<i32> {
         let record = parse(&line?);
         let trans = record_to_trans(&record);
         for line in trans.to_strings() {
-            out_file.write(&line.into_bytes())?;
+            writer.write(&line.into_bytes())?;
         }
-        out_file.flush()?;
+        writer.flush()?;
         count += 1;
 
         // logs every tenth trans
@@ -103,7 +89,57 @@ fn convert_to_journal(args: &CliArgs) -> io::Result<i32> {
     Ok(count)
 }
 
-pub fn parse(line: &str) -> Record {
+fn has_term_input() -> bool { atty::isnt(Stream::Stdin) }
+
+fn get_reader(path: &Option<String>) -> Box<dyn BufRead> {
+
+    return match &path {
+        None => { 
+            if has_term_input() {
+                Box::new(BufReader::new(io::stdin()))
+            } else {
+                panic!("failure!")
+            }
+        },
+        Some(path) => match open_statement(path) {
+            Err(e) => panic!("{:?}", e),
+            Ok(reader) => Box::new(reader),
+        },
+    };
+}
+
+fn get_writer(path: &Option<String>) -> Box<dyn Write> {
+
+    return match &path {
+        None => { 
+            Box::new(BufWriter::new(io::stdout()))
+        },
+        Some(path) => match create_journal(path) {
+            Err(e) => panic!("{:?}", e),
+            Ok(writer) => Box::new(writer),
+        },
+    };
+}
+
+fn create_journal(path: &str) -> io::Result<fs::File> {
+
+    let out_path = path::Path::new(&path).to_str().unwrap();
+    let out_file = fs::File::create(out_path)?;
+    info!("journal created at {}", &out_path);
+
+    Ok(out_file)
+}
+
+fn open_statement(path: &str) -> io::Result<io::BufReader<fs::File>> {
+    let in_path = path::Path::new(&path).to_str().unwrap();
+    let in_file = fs::File::open(in_path)?;
+    let reader = io::BufReader::new(in_file);
+    info!("statement opened at {}", &in_path);
+
+    Ok(reader)
+}
+
+fn parse(line: &str) -> Record {
 
     let values: Vec<&str> = line.split(',').collect();
 
@@ -128,13 +164,13 @@ fn rm_quotes(value: &str) -> String {
 }
 
 #[derive(Debug)]
-pub struct Record {
-    pub date: String,
-    pub amount: f64,
-    pub subject: String,
-    pub location: String,
-    pub point_of_sale: String,
-    pub debit: bool,
+struct Record {
+    date: String,
+    amount: f64,
+    subject: String,
+    location: String,
+    point_of_sale: String,
+    debit: bool,
 }
 
 #[cfg(test)]
@@ -156,7 +192,7 @@ mod parser_tests {
     }
 }
 
-pub fn record_to_trans(record: &Record) -> Transaction {
+fn record_to_trans(record: &Record) -> Transaction {
     Transaction {
         date: record.date.to_string(),
         status: '*',
@@ -174,17 +210,17 @@ fn record_to_postings(record: &Record) -> Vec<Posting> {
 }
 
 #[derive(Debug)]
-pub struct Transaction {
-    pub date: String,
-    pub status: char,
-    pub subject: String,
-    pub postings: Vec<Posting>,
+struct Transaction {
+    date: String,
+    status: char,
+    subject: String,
+    postings: Vec<Posting>,
 }
 
 impl Transaction {
 
     // TODO: complete fn
-    pub fn to_strings(&self) -> Vec<String> {
+    fn to_strings(&self) -> Vec<String> {
         let mut first_line = String::with_capacity(100);
         first_line.push_str(&self.date);
         first_line.push_str(&format!(" {} ", &self.status));
@@ -201,9 +237,9 @@ impl Transaction {
 }
 
 #[derive(Debug)]
-pub struct Posting {
-    pub account: String,
-    pub amount: String,
+struct Posting {
+    account: String,
+    amount: String,
 }
 
 impl Posting {

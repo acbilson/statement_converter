@@ -182,6 +182,7 @@ checksum = "1132f845907680735a84409c3bebc64d1364a5683ffbce899550cd09d5eaefc1"
 name = "statement_parser"
 version = "0.1.0"
 dependencies = [
+ "atty",
  "env_logger",
  "log",
  "structopt",

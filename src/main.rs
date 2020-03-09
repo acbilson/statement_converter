@@ -10,40 +10,28 @@ OUTPUT:
   Expenses:Food:Coffee                                           $3.50
 
 */
-use std::{ 
-    env,
-    process,
-    path, 
-    fs, 
-};
+use std::{env, fs, path, process};
 
-use std::io::{
-    self,
-    BufRead,
-    BufReader,
-    BufWriter,
-    Write,
-};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
 // external crates
-use env_logger::{self, Env};
-use log::{info, debug, warn, error};
-use structopt::StructOpt;
 use atty::Stream;
+use env_logger::{self, Env};
+use log::{debug, error, info, warn};
+use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "cli-args")]
 struct CliArgs {
-
     input: Option<String>,
     output: Option<String>,
+
+    #[structopt(short = "w", long = "journal_width", default_value = "70")]
+    journal_width: u32,
 }
 
 fn enable_logging() {
-    env_logger::from_env(
-        Env::default()
-            .default_filter_or("warn")
-        ).init();
+    env_logger::from_env(Env::default().default_filter_or("warn")).init();
 }
 
 fn main() {
@@ -66,43 +54,38 @@ fn main() {
 
 #[derive(Debug)]
 struct ConvertConfig {
-    journal_width: u32,
     nth_to_log: u32,
 }
 
+/// returns a configuration struct with optional values from environment variables
 fn get_config() -> ConvertConfig {
-
-    let default_journal_width: u32 = 70;
     let default_nth_to_log: u32 = 25;
-
-    let journal_width = match env::var("JOURNAL_WIDTH") {
-        Ok(w) => match w.parse::<u32>() {
-            Ok(i) => i,
-            Err(e) =>  { warn!("{:?}", e); default_journal_width }
-        },
-        Err(e) => { warn!("{:?}", e); default_journal_width }
-    };
 
     let nth_to_log = match env::var("NTH_TO_LOG") {
         Ok(w) => match w.parse::<u32>() {
             Ok(i) => i,
-            Err(e) =>  { warn!("{:?}", e); default_nth_to_log }
+            Err(e) => {
+                warn!("{:?}", e);
+                default_nth_to_log
+            }
         },
-        Err(e) => { warn!("{:?}", e); default_nth_to_log }
+        Err(_e) => {
+            info!("Optional environment variable NTH_TO_LOG is not set. Defaults to logging every 25th record.");
+            default_nth_to_log
+        }
     };
 
-    ConvertConfig { journal_width, nth_to_log }
+    ConvertConfig { nth_to_log }
 }
 
-/*
-*   1. get file reader & writer
-*   2. deserialize to record
-*   3. convert to transaction
-*   4. write as string
-*   5. return report
-*/
+/// Converts a bank statement into a ledger-cli compliant journal file
+///  ## Steps
+///  1. get file reader & writer
+///  2. deserialize to record
+///  3. convert to transaction
+///  4. write as string
+///  5. return report
 fn convert_to_journal(args: &CliArgs, conf: &ConvertConfig) -> io::Result<ConvertReport> {
-
     let reader = get_reader(&args.input)?;
     let mut writer = get_writer(&args.output)?;
 
@@ -115,7 +98,7 @@ fn convert_to_journal(args: &CliArgs, conf: &ConvertConfig) -> io::Result<Conver
 
         let record = parse(&line);
         let trans = record_to_trans(&record);
-        for line in trans.to_strings(&conf.journal_width) {
+        for line in trans.to_strings(&args.journal_width) {
             writer.write(&line.into_bytes())?;
         }
         writer.flush()?;
@@ -124,7 +107,7 @@ fn convert_to_journal(args: &CliArgs, conf: &ConvertConfig) -> io::Result<Conver
         log_nth(trans, count, conf.nth_to_log);
     }
 
-    Ok(ConvertReport { total: count } )
+    Ok(ConvertReport { total: count })
 }
 
 fn log_nth(val: impl std::fmt::Debug, count: u32, n: u32) {
@@ -143,19 +126,24 @@ impl ConvertReport {
     }
 }
 
-fn has_term_input() -> bool { atty::isnt(Stream::Stdin) }
+fn has_term_input() -> bool {
+    atty::isnt(Stream::Stdin)
+}
 
+/// returns a buffered reader from an input file, if present, or from stdin
 fn get_reader(path: &Option<String>) -> io::Result<Box<dyn BufRead>> {
-
     return match &path {
-        None => { 
+        None => {
             if has_term_input() {
                 info!("input streaming from stdin.");
                 Ok(Box::new(BufReader::new(io::stdin())))
             } else {
-                Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdin is unavailable."))
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "stdin is unavailable.",
+                ))
             }
-        },
+        }
         Some(path) => match open_statement(path) {
             Err(e) => Err(e),
             Ok(reader) => Ok(Box::new(reader)),
@@ -163,20 +151,19 @@ fn get_reader(path: &Option<String>) -> io::Result<Box<dyn BufRead>> {
     };
 }
 
+/// returns a buffered writer to an input file, if present, or to stdout
 fn get_writer(path: &Option<String>) -> io::Result<Box<dyn Write>> {
-
     return match &path {
-        None => { 
+        None => {
             info!("output streaming to stdout.");
             Ok(Box::new(BufWriter::new(io::stdout())))
-        },
+        }
         Some(path) => match create_journal(path) {
             Err(e) => Err(e),
             Ok(writer) => Ok(Box::new(writer)),
         },
     };
 }
-
 
 fn create_journal(path: &str) -> io::Result<fs::File> {
     let out_path = path::Path::new(&path).to_str().unwrap();
@@ -194,7 +181,6 @@ fn open_statement(path: &str) -> io::Result<io::BufReader<fs::File>> {
 }
 
 fn parse(line: &str) -> Record {
-
     let values: Vec<&str> = line.split(',').collect();
 
     Record {
@@ -216,9 +202,7 @@ fn parse_date(value: &str) -> String {
 }
 
 fn rm_quotes(value: &str) -> String {
-    value.trim_matches(
-        |c| c == '\\' || c == '"'
-    ).to_string()
+    value.trim_matches(|c| c == '\\' || c == '"').to_string()
 }
 
 #[derive(Debug)]
@@ -260,11 +244,10 @@ fn record_to_trans(record: &Record) -> Transaction {
 }
 
 fn record_to_postings(record: &Record) -> Vec<Posting> {
-    vec![
-    Posting {
+    vec![Posting {
         account: "Expenses:Unknown".to_string(),
         amount: amount_to_string(&record.amount),
-    },]
+    }]
 }
 
 fn amount_to_string(amount: &f64) -> String {
@@ -282,7 +265,6 @@ fn decimal_count(val: &str) -> usize {
     val.get(val.find('.').unwrap()..).unwrap().len() - 1
 }
 
-
 #[derive(Debug)]
 struct Transaction {
     date: String,
@@ -292,7 +274,6 @@ struct Transaction {
 }
 
 impl Transaction {
-
     // TODO: complete fn
     fn to_strings(&self, width: &u32) -> Vec<String> {
         let mut first_line = String::with_capacity(100);
@@ -318,7 +299,6 @@ struct Posting {
 }
 
 impl Posting {
-
     fn to_string(&self, width: &u32) -> String {
         let mut result = String::with_capacity(100);
         result.push_str("  ");
@@ -333,7 +313,6 @@ impl Posting {
         let size = *width as usize - &self.account.len() - &self.amount.len();
         vec![' '; size].into_iter().collect()
     }
-
 }
 
 #[cfg(test)]
@@ -343,8 +322,8 @@ mod trans_tests {
     #[test]
     fn converts_record() {
         let record = Record {
-            date: "2019/07/16".to_string(), 
-            amount: 7.72, 
+            date: "2019/07/16".to_string(),
+            amount: 7.72,
             subject: "5059 Debit Card Purchase Dollarshaveclubus".to_string(),
             location: String::new(),
             point_of_sale: "7790345006".to_string(),
@@ -357,26 +336,4 @@ mod trans_tests {
         assert_eq!("$7.72", actual.postings[0].amount);
         assert_eq!(record.subject, actual.subject);
     }
-
-    #[test]
-    fn prints_trans() {
-        let trans = Transaction {
-            date: "07/16".to_string(), 
-            status: '*',
-            subject: "5059 Debit Card Purchase Dollarshaveclubus".to_string(),
-            postings: vec![
-                Posting {
-                    account: "Expenses:Unknown".to_string(),
-                    amount: "$7.72".to_string(), 
-                },
-            ]
-        };
-
-        let actual = trans.to_strings();
-
-        assert!(actual.len() == 2);
-        assert_eq!("07/16 * 5059 Debit Card Purchase Dollarshaveclubus\n".to_string(), actual[0]);
-        assert_eq!("  Expenses:Unknown  $7.72\n".to_string(), actual[1]);
-    }
-
 }

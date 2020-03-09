@@ -10,7 +10,7 @@ OUTPUT:
   Expenses:Food:Coffee                                           $3.50
 
 */
-use std::{env, fs, path, process};
+use std::{fmt, env, fs, path, process};
 
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 
@@ -98,8 +98,11 @@ fn convert_to_journal(args: &CliArgs, conf: &ConvertConfig) -> io::Result<Conver
 
         let record = parse(&line);
         let trans = record_to_trans(&record);
-        for line in trans.to_strings(&args.journal_width) {
-            writer.write(&line.into_bytes())?;
+        for line in trans.to_strings(args.journal_width) {
+            match writer.write(&line.into_bytes()) {
+                Ok(size) => log_nth(size, count, conf.nth_to_log),
+                Err(e) => warn!("{:?}", e),
+            };
         }
         writer.flush()?;
         count += 1;
@@ -120,9 +123,9 @@ struct ConvertReport {
     total: u32,
 }
 
-impl ConvertReport {
-    fn to_string(&self) -> String {
-        format!("Total transactions recorded: {}", &self.total)
+impl fmt::Display for ConvertReport {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", format!("Total transactions recorded: {}", &self.total))
     }
 }
 
@@ -132,7 +135,7 @@ fn has_term_input() -> bool {
 
 /// returns a buffered reader from an input file, if present, or from stdin
 fn get_reader(path: &Option<String>) -> io::Result<Box<dyn BufRead>> {
-    return match &path {
+    match &path {
         None => {
             if has_term_input() {
                 info!("input streaming from stdin.");
@@ -148,12 +151,12 @@ fn get_reader(path: &Option<String>) -> io::Result<Box<dyn BufRead>> {
             Err(e) => Err(e),
             Ok(reader) => Ok(Box::new(reader)),
         },
-    };
+    }
 }
 
 /// returns a buffered writer to an input file, if present, or to stdout
 fn get_writer(path: &Option<String>) -> io::Result<Box<dyn Write>> {
-    return match &path {
+    match &path {
         None => {
             info!("output streaming to stdout.");
             Ok(Box::new(BufWriter::new(io::stdout())))
@@ -162,7 +165,7 @@ fn get_writer(path: &Option<String>) -> io::Result<Box<dyn Write>> {
             Err(e) => Err(e),
             Ok(writer) => Ok(Box::new(writer)),
         },
-    };
+    }
 }
 
 fn create_journal(path: &str) -> io::Result<fs::File> {
@@ -246,17 +249,17 @@ fn record_to_trans(record: &Record) -> Transaction {
 fn record_to_postings(record: &Record) -> Vec<Posting> {
     vec![Posting {
         account: "Expenses:Unknown".to_string(),
-        amount: amount_to_string(&record.amount),
+        amount: amount_to_string(record.amount),
     }]
 }
 
-fn amount_to_string(amount: &f64) -> String {
+fn amount_to_string(amount: f64) -> String {
     let amount = format!("${}", amount);
 
     if !amount.contains('.') {
-        return format!("{}.00", amount).to_string();
+        return format!("{}.00", amount);
     } else if decimal_count(&amount) < (2 as usize) {
-        return format!("{}0", amount).to_string();
+        return format!("{}0", amount);
     }
     amount
 }
@@ -274,8 +277,8 @@ struct Transaction {
 }
 
 impl Transaction {
-    // TODO: complete fn
-    fn to_strings(&self, width: &u32) -> Vec<String> {
+
+    fn to_strings(&self, width: u32) -> Vec<String> {
         let mut first_line = String::with_capacity(100);
         first_line.push_str(&self.date);
         first_line.push_str(&format!(" {} ", &self.status));
@@ -284,7 +287,7 @@ impl Transaction {
 
         let mut second_line = String::with_capacity(100);
         for post in &self.postings {
-            second_line.push_str(&post.to_string(&width));
+            second_line.push_str(&post.to_string(width));
         }
         second_line.push('\n');
 
@@ -299,18 +302,18 @@ struct Posting {
 }
 
 impl Posting {
-    fn to_string(&self, width: &u32) -> String {
+    fn to_string(&self, width: u32) -> String {
         let mut result = String::with_capacity(100);
         result.push_str("  ");
         result.push_str(&self.account);
-        result.push_str(&self.width_to_string(&width));
+        result.push_str(&self.width_to_string(width));
         result.push_str(&self.amount.to_string());
         result.push('\n');
         result
     }
 
-    fn width_to_string(&self, width: &u32) -> String {
-        let size = *width as usize - &self.account.len() - &self.amount.len();
+    fn width_to_string(&self, width: u32) -> String {
+        let size = width as usize - self.account.len() - self.amount.len();
         vec![' '; size].into_iter().collect()
     }
 }
